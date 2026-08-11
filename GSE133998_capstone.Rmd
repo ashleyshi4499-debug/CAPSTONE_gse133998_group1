@@ -5,7 +5,6 @@ output: html_document
 
 ```{r}
 # Read the raw RNA-seq count matrix for GSE133998
-# 将 GSE133998 的 RNA-seq 原始计数矩阵读取到R中
 
 data <- read.table(
   "data/GSE133998_raw_counts_GRCh38.p13_NCBI.tsv.gz",
@@ -1264,6 +1263,78 @@ fgsea_df %>%
     leadingEdge
   ) %>%
   head(15)
+```
+```{r}
+# Plot a representative immune-related FGSEA pathway
+# 绘制代表性的免疫相关FGSEA enrichment curve
+fgsea_ifng_plot <- plotEnrichment(
+  
+  # Gene set for Interferon Gamma Response
+  # 提取Interferon Gamma Response对应的genes
+  pathways[["HALLMARK_INTERFERON_GAMMA_RESPONSE"]],
+  
+  # Complete ranked gene list
+  # 使用之前按照DESeq2 stat排序的完整gene list
+  ranks
+) +
+  
+  # Add a title
+  # 添加图标题
+  labs(
+    title = "FGSEA: Interferon Gamma Response"
+  )
+
+
+# Display the plot
+# 显示经典FGSEA enrichment curve
+fgsea_ifng_plot
+```
+```{r}
+# Plot a representative proliferation-related FGSEA pathway
+# 绘制代表性的细胞增殖相关FGSEA enrichment curve
+fgsea_e2f_plot <- plotEnrichment(
+  
+  # Gene set for E2F Targets
+  # 提取E2F Targets对应的genes
+  pathways[["HALLMARK_E2F_TARGETS"]],
+  
+  # Complete ranked gene list
+  # 使用完整ranked gene list
+  ranks
+) +
+  
+  # Add a title
+  # 添加图标题
+  labs(
+    title = "FGSEA: E2F Targets"
+  )
+
+
+# Display the plot
+# 显示经典FGSEA enrichment curve
+fgsea_e2f_plot
+```
+```{r}
+# Save the Interferon Gamma Response enrichment plot
+# 保存经典FGSEA图
+ggsave(
+  "figures/FGSEA_interferon_gamma_response.png",
+  plot = fgsea_ifng_plot,
+  width = 8,
+  height = 5,
+  dpi = 300
+)
+
+
+# Save the E2F Targets enrichment plot
+# 保存经典FGSEA图
+ggsave(
+  "figures/FGSEA_E2F_targets.png",
+  plot = fgsea_e2f_plot,
+  width = 8,
+  height = 5,
+  dpi = 300
+)
 ```
 
 ```{r}
