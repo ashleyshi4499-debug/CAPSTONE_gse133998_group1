@@ -2,6 +2,7 @@
 title: "GSE133998_capstone"
 output: html_document
 ---
+# 1.set up
 
 ```{r}
 # Read the raw RNA-seq count matrix for GSE133998
@@ -63,9 +64,11 @@ dim(counts)
 # Check the column names
 colnames(counts)
 ```
+
+# 2.load data
+## 2.1 metadata
 ```{r}
 # Create sample metadata
-# 建立样本信息表metadata
 metadata <- data.frame(
   
   # Sample ID
@@ -109,6 +112,7 @@ table(metadata$condition)
 # 一个 Normal + 一个 Cancer
 table(metadata$patient)
 ```
+
 ```{r}
 # Check whether GeneID values are unique
 # 检查 GeneID 是否存在重复
@@ -134,6 +138,8 @@ dim(counts)
 # 查看整理后的 count matrix
 head(counts[, 1:4])
 ```
+
+## 2.2 data QC
 ```{r}
 # Check whether all expression values are integers
 # 检查所有表达值是否都是整数
@@ -152,9 +158,12 @@ any(counts < 0)
 
 # Look at the overall distribution of count values
 # 查看所有 count 值的大致分布
+# right-skewed是很正常的（大量基因表达很低，甚至为0）
 summary(as.vector(as.matrix(counts)))
 ```
+
 ```{r}
+# 核心目的：让metadata里的样本顺序与counts里的样本顺序完全一致
 # Use sample IDs as row names of metadata
 # 把sample ID设置成metadata的行名
 rownames(metadata) <- metadata$sample
@@ -170,6 +179,7 @@ all(
   colnames(counts) == rownames(metadata)
 )
 ```
+
 ```{r}
 # Convert condition into a factor
 # condition 是分类变量，而不是普通文字
@@ -192,12 +202,17 @@ str(metadata)
 
 # Check the reference level of condition
 # levels 的第一个值 Normal 将作为 reference group
+# log2FC > 0 → Cancer 中表达更高
+# log2FC < 0 → Cancer 中表达更低
 levels(metadata$condition)
 ```
 
+# 3. DESeq2
 ```{r}
 library(DESeq2)
 ```
+
+## 3.1 build DDS
 ```{r}
 # Create a DESeq2 dataset object
 # 将 raw counts 和 metadata 组合成 DESeq2 可以分析的对象
@@ -222,6 +237,7 @@ dds <- DESeqDataSetFromMatrix(
 # 查看 dds 是否成功创建
 dds
 ```
+
 ```{r}
 # Identify genes with sufficient expression
 # 一个 gene 至少需要在 3 个 samples 中 count >= 10 才保留
@@ -244,10 +260,13 @@ dds <- dds[keep, ]
 # 查看过滤之后剩余多少 genes 和 samples
 dim(dds)
 ```
+
+## 3.2 VST
 ```{r}
-# Apply variance stabilizing transformation (VST)
-# 将 count data 转换为更适合 PCA 和 clustering 的尺度
+# Apply variance stabilizing transformation (VST)(方差稳定转化)
+# 将 count data 转换为更适合 PCA 和 clustering 的尺度，让不同表达水平的 gene 的 variance 更稳定、更可比较。
 # VST主要用于 visualization，不是用来替代 raw counts 做DE分析
+# blind：在进行VST时，不完全忽略已经定义好的实验信息（design，condition）
 vsd <- vst(
   dds,
   blind = FALSE
@@ -258,17 +277,18 @@ vsd <- vst(
 # 查看 VST 转换后的数据
 head(assay(vsd)[, 1:4])
 ```
+
+# 4. EDA
+## 4.1 PCA
 ```{r}
 # Generate PCA data
 # 使用 VST-transformed expression data 进行 PCA
 pca_data <- plotPCA(
   
   # VST-transformed data
-  # 使用经过 VST 转换的数据
   vsd,
   
   # Group samples according to condition
-  # 告诉 PCA 图按照 Cancer / Normal 区分样本
   intgroup = "condition",
   
   # Return the PCA coordinates instead of directly plotting
@@ -278,7 +298,7 @@ pca_data <- plotPCA(
 
 
 # Calculate the percentage of variance explained by PC1 and PC2
-# 计算 PC1 和 PC2 分别解释多少总体 variation
+# attr是pca_data附带的属性；100*把小数转成百分比；round四舍五入
 percent_var <- round(
   100 * attr(
     pca_data,
@@ -290,6 +310,8 @@ percent_var <- round(
 # Check PCA data
 # 查看 PCA 结果
 head(pca_data)
+
+# dds-vst→vsd-plotpca()→pca_data-PC1&PC2&condition info
 ```
 
 ```{r}
@@ -301,6 +323,7 @@ library(ggplot2)
 # Plot PCA
 # 每一个点代表一个 sample
 # Cancer 和 Normal 使用不同颜色表示
+# 注意：仅仅写label = name 并不会自动显示文字；geom_text()或geom_text_repel()才可以
 pca_plot <- ggplot(
   pca_data,
   aes(
@@ -341,12 +364,15 @@ pca_plot <- ggplot(
 # 显示PCA图
 pca_plot
 ```
+
+## 4.2 correlation heatmap
 ```{r}
 library(pheatmap)
 
 
 # Calculate sample-to-sample correlation
-# 计算任意两个samples之间的gene-expression correlation
+# assay(vsd)把vsd里的VST-matrix提取出来，row = gene, column = sample, value + expression value after VST
+# cor默认计算col与col之间的Pearson correlation，cor(S01, S03) = 0.96，说明S01和S03在所有基因表达模式上非常相似
 sample_cor <- cor(
   assay(vsd)
 )
@@ -366,19 +392,21 @@ pheatmap(
   sample_cor,
   
   # Add condition and patient information
-  # 添加sample分组和patient信息
   annotation_col = annotation_col,
   
   # Display sample names
-  # 显示sample ID
   show_colnames = TRUE,
   show_rownames = TRUE,
   
   # Heatmap title
-  # 图标题
   main = "Sample Correlation Heatmap"
 )
+
+# 对于paired samples，可能出现，同一condition更相似，说明cancer/normal condition是整体表达差异的主要来源；同一patient更相似，说明patient-to-patient变化更显著
+# dendrogram（树状图/层次聚类树）说明的是样本之间的层次相似关系
 ```
+
+# 5. DEG
 ```{r}
 # Run the complete DESeq2 differential expression pipeline
 # 1. normalization
@@ -387,13 +415,14 @@ pheatmap(
 # 4. statistical testing
 dds <- DESeq(dds)
 ```
+## 5.1 DESeq2 results
 ```{r}
 # Extract differential expression results
 res <- results(
   dds,
   
   # Define the comparison:
-  # Cancer / Normal
+  # 在condition这个变量中，用Cancer / Normal，Log2FC > 0, cancer表达更高
   contrast = c(
     "condition",
     "Cancer",
@@ -409,8 +438,10 @@ summary(res)
 
 # View the first few rows
 # 查看DESeq2结果
+# basemean：平均normalized expression；lfcSE：log2FC的standard error
 head(res)
 ```
+
 ```{r}
 # Load dplyr and tibble
 # 后续用于整理 differential expression results
@@ -420,6 +451,7 @@ library(tibble)
 
 # Convert DESeq2 results into a normal data.frame
 # 并把 GeneID 从 row names 恢复成普通 column
+# DESeq2输入count matrix时，GeneID需要成为row names；DESeq2做完，整理结果表，DeneID作为column更方便
 res_df <- as.data.frame(res) %>%
   rownames_to_column("GeneID")
 
@@ -435,6 +467,7 @@ head(res_df)
 
 ```{r}
 # Save the complete DESeq2 results
+# 保存时，不要把R的row names写进csv
 write.csv(
   res_df,
   "results/GSE133998_DESeq2_all_results.csv",
@@ -442,10 +475,28 @@ write.csv(
 )
 ```
 
+## 5.2 DEG classification
 ```{r}
 # Classify genes according to significance and direction
 # 根据adjusted p-value和log2FoldChange把genes分成：
 # Up、Down、Not significant
+# 也可以用ifelse()
+# deg_df <- res_df %>%
+# mutate(
+#   regulation = ifelse(
+#     !is.na(padj) &
+#       padj < 0.001 &
+#       log2FoldChange > 1,
+#     "Up",
+#     ifelse(
+#       !is.na(padj) &
+#         padj < 0.001 &
+#         log2FoldChange < -1,
+#       "Down",
+#       "Not significant"
+#     )
+#   )
+# )
 deg_df <- res_df %>%
   mutate(
     regulation = case_when(
@@ -476,10 +527,13 @@ deg_df <- res_df %>%
 table(deg_df$regulation)
 ```
 
+## 5.3 gene annotation
 ```{r}
 # Check what the object "annotation" currently is
 class(annotation)
+# annotation在这里是一个系统函数，而不是一个表格
 ```
+
 ```{r}
 # Read the gene annotation file
 # 重新读取gene annotation文件
@@ -515,6 +569,7 @@ dim(gene_annotation)
 # Check column names
 colnames(gene_annotation)
 ```
+
 ```{r}
 # Make sure GeneID has the same data type in both datasets
 res_df$GeneID <- as.character(res_df$GeneID)
@@ -537,6 +592,8 @@ annotation_small <- gene_annotation %>%
 ```{r}
 # Add gene annotation to the differential expression results
 # 根据GeneID，把Symbol、GeneType和Description加入DESeq2结果中
+# left join()的规则是，左边的表全部保留，右边能匹配到的annotation加进来，所以，即使某个GeneID在annotation里找不到，也不会被删除，只是显示NA
+
 deg_annotated <- deg_df %>%
   left_join(
     annotation_small,
@@ -545,7 +602,6 @@ deg_annotated <- deg_df %>%
 
 
 # Check whether annotation was added successfully
-# 查看注释后的结果
 head(
   deg_annotated[, c(
     "GeneID",
@@ -559,14 +615,13 @@ head(
 
 
 # Check how many genes do not have a gene symbol
-# 检查有多少genes没有匹配到Symbol
 sum(
   is.na(deg_annotated$Symbol) |
     deg_annotated$Symbol == ""
 )
 ```
 
-
+## 5.4 volcano plot
 ```{r}
 library(ggplot2)
 
@@ -584,7 +639,6 @@ volcano_plot <- ggplot(
 ) +
   
   # Draw one point for each gene
-  # 每一个点代表一个 gene
   # alpha 用于设置透明度，避免大量点完全重叠
   geom_point(
     alpha = 0.6,
@@ -623,6 +677,7 @@ volcano_plot <- ggplot(
 # Display the volcano plot
 volcano_plot
 ```
+
 ```{r}
 # Select significantly differentially expressed genes
 # 只保留满足我们DEG阈值的genes
@@ -633,7 +688,7 @@ sig_genes <- deg_annotated %>%
 
 
 # Sort significant genes by adjusted p-value
-# 按padj从小到大排序
+# 按padj从小到大排序，arrange默认升序，降序的话用arrange(desc(padj))
 # padj越小，统计学证据越强
 sig_genes <- sig_genes %>%
   arrange(padj)
@@ -641,13 +696,11 @@ sig_genes <- sig_genes %>%
 
 # Select the top 30 most significant genes
 # 选择padj最小的前30个DEGs用于heatmap
-# 这样可以展示最有代表性的表达差异
 top30 <- sig_genes %>%
   slice_head(n = 30)
 
 
 # Display the selected top genes
-# 查看最终进入heatmap的30个genes
 top30 %>%
   select(
     GeneID,
@@ -658,6 +711,7 @@ top30 %>%
   )
 ```
 
+## 5.5 top 30 DEG heatmap
 ```{r}
 # Extract the GeneIDs of the top 30 DEGs
 # 提取top 30 genes对应的GeneID
@@ -676,6 +730,7 @@ heatmap_mat <- assay(vsd)[
 # Check the dimensions of the heatmap matrix
 dim(heatmap_mat)
 ```
+
 ```{r}
 # Standardize expression values for each gene using Z-score
 # 对每个gene进行row-wise标准化
@@ -747,6 +802,7 @@ pheatmap(
   main = "Top 30 Differentially Expressed Genes"
 )
 ```
+
 ```{r}
 # Draw a cleaner heatmap for presentation
 # 为PPT绘制更清晰的heatmap
@@ -780,6 +836,8 @@ pheatmap(
   main = "Top 30 Differentially Expressed Genes"
 )
 ```
+
+# 6. pathway analysis
 ```{r}
 # Select significantly upregulated genes in Cancer
 # 提取在Cancer中显著上调的genes
@@ -832,9 +890,12 @@ length(down_genes)
 head(up_genes)
 head(down_genes)
 ```
+
+## 6.1 Enrichr
 ```{r}
 library(enrichR)
 ```
+
 ```{r}
 # Define the Enrichr databases used for pathway analysis
 # 选择用于功能富集分析的gene-set databases
@@ -874,9 +935,11 @@ enrichr_down <- enrichr(
   enrichr_dbs
 )
 ```
+
 ```{r}
 # Display the database names contained in the upregulated results
 # 查看Cancer-upregulated genes分析返回了哪些数据库
+# 两个实际作用：第一，确认 Enrichr 是否真的返回了预期的几个数据库结果；第二，避免后面把数据库名字写错。
 names(enrichr_up)
 
 
@@ -884,9 +947,11 @@ names(enrichr_up)
 # 查看Cancer-downregulated genes分析返回了哪些数据库
 names(enrichr_down)
 ```
+
 ```{r}
 # View the top Hallmark pathways enriched among upregulated genes
 # 查看Cancer中上调genes最显著的Hallmark pathways
+# 优先展示 MSigDB_Hallmark_2020，通常是因为 Hallmark gene sets 比较精炼、重复性较低，也比较容易做整体生物学解释
 head(
   enrichr_up[["MSigDB_Hallmark_2020"]]
 )
@@ -898,6 +963,7 @@ head(
   enrichr_down[["MSigDB_Hallmark_2020"]]
 )
 ```
+
 ```{r}
 # Sort Hallmark enrichment results for upregulated genes
 # 按adjusted p-value从小到大排序
@@ -920,6 +986,7 @@ head(hallmark_down, 10)
 ```{r}
 # Select significantly enriched Hallmark pathways
 # 只保留adjusted p-value < 0.05的显著Hallmark pathways
+# 也可以改成，先arrange() %>% filter() %>% slice_head()
 hallmark_up_sig <- hallmark_up %>%
   filter(
     Adjusted.P.value < 0.05
@@ -950,7 +1017,7 @@ hallmark_up_top10 <- hallmark_up_top10 %>%
 
 ```{r}
 # Create a bar plot of the top enriched Hallmark pathways
-# 绘制Cancer中上调genes的Top Hallmark enrichment结果
+# Term是Pathway，reorder是根据log10_padj的大小重新排列pathway的顺序
 hallmark_plot <- ggplot(
   hallmark_up_top10,
   aes(
@@ -988,12 +1055,12 @@ hallmark_plot <- ggplot(
 # 显示最终的Hallmark enrichment bar plot
 hallmark_plot
 ```
+## 6.2 FGSEA
 ```{r}
 # Prepare a ranked gene table for FGSEA
 # 为FGSEA准备所有genes的排名表
-#
 # FGSEA不使用DEG cutoff，而是使用所有可用genes
-# 这里使用DESeq2的stat作为ranking metric
+# 这里使用DESeq2的stat*（Wald statistic）作为ranking metric
 fgsea_rank_df <- deg_annotated %>%
   
   # Remove genes without a valid DESeq2 statistic
@@ -1005,7 +1072,6 @@ fgsea_rank_df <- deg_annotated %>%
   ) %>%
   
   # Keep the columns needed for ranking
-  # 保留gene symbol和DESeq2 stat
   select(
     Symbol,
     stat
@@ -1014,9 +1080,9 @@ fgsea_rank_df <- deg_annotated %>%
 
 # Remove duplicated gene symbols
 # 如果多个GeneID对应同一个Symbol，只保留一个
-#
 # 这里先按stat绝对值从大到小排序
-# 保留统计信号最强的那一个
+# 保留统计信号最强的那一个，且保留这一行的其他变量（stat）
+# abs()是取绝对值absolute value（方向相反，但绝对值大的统计信号强）
 fgsea_rank_df <- fgsea_rank_df %>%
   arrange(
     desc(abs(stat))
@@ -1049,7 +1115,7 @@ names(ranks) <- fgsea_rank_df$Symbol
 
 
 # Sort genes from highest stat to lowest stat
-# 按stat从大到小排序
+# 按stat从大到小排序，对numerric vector排序，用sort()
 #
 # ranking顶部：
 # 更倾向于Cancer中高表达
@@ -1071,6 +1137,7 @@ head(ranks)
 # 查看Normal-associated排名较高，也就是Cancer中较低表达的genes
 tail(ranks)
 ```
+
 ```{r}
 # Prepare a ranked gene list for FGSEA
 # 为FGSEA准备所有genes的排序列表
@@ -1083,7 +1150,6 @@ tail(ranks)
 ranked_df <- deg_annotated %>%
   
   # Remove genes without a valid DESeq2 statistic
-  # 删除stat为NA的genes
   filter(
     !is.na(stat),
     !is.na(Symbol),
@@ -1091,91 +1157,28 @@ ranked_df <- deg_annotated %>%
   ) %>%
   
   # Keep gene symbol and DESeq2 statistic
-  # 只保留FGSEA需要的gene symbol和stat
   select(
     Symbol,
     stat
   )
 ```
 
-```{r}
-# Sort genes by the absolute value of DESeq2 stat
-# 按stat绝对值从大到小排序
-# 如果同一个Symbol对应多个GeneID，
-# 后续会优先保留统计信号最强的那一个
-ranked_df <- ranked_df %>%
-  arrange(
-    desc(abs(stat))
-  )
-
-# Remove duplicated gene symbols
-# 删除重复的gene symbols
-# 每个Symbol只保留一条记录
-ranked_df <- ranked_df %>%
-  distinct(
-    Symbol,
-    .keep_all = TRUE
-  )
-
-# Check the first few rows
-# 查看整理后的ranked gene table
-head(ranked_df)
-
-# Check how many unique genes remain
-# 查看最终有多少unique gene symbols
-nrow(ranked_df)
-```
-```{r}
-# Extract DESeq2 stat values
-# 提取每个gene对应的DESeq2 stat
-ranks <- ranked_df$stat
-
-
-# Assign gene symbols as names
-# 把gene symbol设置为每个stat值对应的名称
-names(ranks) <- ranked_df$Symbol
-
-
-# Sort genes from the highest stat to the lowest stat
-# FGSEA要求ranked gene list有明确的排序
-# stat越大，越偏向Cancer
-# stat越小（负值越大），越偏向Normal
-ranks <- sort(
-  ranks,
-  decreasing = TRUE
-)
-
-
-# Check genes at the top of the ranked list
-# 查看排名最前面的genes
-head(ranks)
-
-
-# Check genes at the bottom of the ranked list
-# 查看排名最后面的genes
-tail(ranks)
-
-
-# Check the total number of ranked genes
-# 查看最终ranked list中的gene数量
-length(ranks)
-```
 
 ```{r}
+
+# msigdbr是一个R package，把molecular signatures database里的gene sets直接提供给R使用
 # Load Hallmark, KEGG and Reactome pathways
-# 加载Hallmark、KEGG和Reactome gene sets
+
 library(msigdbr)
 library(dplyr)
 
-# Hallmark pathways
-# 加载Hallmark pathways
+# Hallmark pathways，collection = Hallmark gene sets，精炼，代表比较明确的生物学过程，适合先看整体biological theme
 hallmark <- msigdbr(
   species = "Homo sapiens",
   collection = "H"
 )
 
-# KEGG pathways
-# 加载KEGG legacy pathways
+# KEGG pathways，C2是curated gene sets，包含pathway database、文献等来源整理的gene sets
 kegg <- msigdbr(
   species = "Homo sapiens",
   collection = "C2",
@@ -1183,7 +1186,6 @@ kegg <- msigdbr(
 )
 
 # Reactome pathways
-# 加载Reactome pathways
 reactome <- msigdbr(
   species = "Homo sapiens",
   collection = "C2",
@@ -1199,8 +1201,7 @@ all_pathways_df <- bind_rows(
 )
 
 # Convert to the named list format required by fgsea
-# 转换成fgsea需要的named list：
-# 每一个pathway对应一组gene symbols
+# 每一个pathway对应一组gene symbols，split(x, group),按照group分类，把x分为不同组
 pathways <- split(
   all_pathways_df$gene_symbol,
   all_pathways_df$gs_name
@@ -1214,6 +1215,7 @@ length(pathways)
 # 查看前几个pathway名称
 head(names(pathways))
 ```
+
 ```{r}
 library(fgsea)
 
@@ -1222,11 +1224,11 @@ library(fgsea)
 fgsea_res <- fgsea(
   
   # Pathway gene sets
-  # Hallmark + KEGG + Reactome
+  # Hallmark + KEGG + Reactome，右边的pathway是上边split得到的list
   pathways = pathways,
   
   # Ranked DESeq2 statistics
-  # 所有genes按照stat排序后的named vector
+  # 右侧ranks是所有genes按照stat排序后的named vector
   stats = ranks,
   
   # Minimum pathway size
@@ -1251,6 +1253,7 @@ fgsea_df <- fgsea_df %>%
 # 查看最显著的15条pathways
 head(fgsea_df, 15)
 ```
+
 ```{r}
 # Display the most important FGSEA columns
 # 查看FGSEA最关键的结果：
@@ -1264,6 +1267,7 @@ fgsea_df %>%
   ) %>%
   head(15)
 ```
+
 ```{r}
 # Plot a representative immune-related FGSEA pathway
 # 绘制代表性的免疫相关FGSEA enrichment curve
@@ -1279,7 +1283,6 @@ fgsea_ifng_plot <- plotEnrichment(
 ) +
   
   # Add a title
-  # 添加图标题
   labs(
     title = "FGSEA: Interferon Gamma Response"
   )
@@ -1289,6 +1292,7 @@ fgsea_ifng_plot <- plotEnrichment(
 # 显示经典FGSEA enrichment curve
 fgsea_ifng_plot
 ```
+
 ```{r}
 # Plot a representative proliferation-related FGSEA pathway
 # 绘制代表性的细胞增殖相关FGSEA enrichment curve
@@ -1314,6 +1318,7 @@ fgsea_e2f_plot <- plotEnrichment(
 # 显示经典FGSEA enrichment curve
 fgsea_e2f_plot
 ```
+
 ```{r}
 # Save the Interferon Gamma Response enrichment plot
 # 保存经典FGSEA图
@@ -1375,6 +1380,7 @@ fgsea_plot_df %>%
     padj
   )
 ```
+
 ```{r}
 # Create an FGSEA NES bar plot
 # 绘制代表性pathways的Normalized Enrichment Score
@@ -1418,6 +1424,7 @@ fgsea_summary_plot <- ggplot(
 # 显示FGSEA summary plot
 fgsea_summary_plot
 ```
+# 7. drug repurposing
 ```{r}
 # Select significantly upregulated genes in Cancer
 # 提取Cancer中显著上调的genes
@@ -1468,6 +1475,7 @@ disease_up %>%
 # 理论上应为150
 nrow(disease_up)
 ```
+
 ```{r}
 # Select significantly downregulated genes in Cancer
 # 提取Cancer中显著下调的genes
@@ -1518,6 +1526,7 @@ disease_down %>%
 # 理论上应为150
 nrow(disease_down)
 ```
+
 ```{r}
 # Create the upregulated disease gene vector
 # 提取Cancer-up gene symbols
@@ -1540,9 +1549,10 @@ length(disease_down_genes)
 head(disease_up_genes)
 head(disease_down_genes)
 ```
+
 ```{r}
 # Create a folder for drug-repurposing results
-# 建立drug repurposing结果文件夹
+# 建立drug repurposing结果文件夹，上一级results不存在，则R一同创建；如果已经存在，不要弹出warning
 dir.create(
   "results/drug_repurposing",
   recursive = TRUE,
@@ -1551,7 +1561,7 @@ dir.create(
 
 
 # Save Cancer-up gene symbols
-# 保存150个Cancer-up genes
+# 保存150个Cancer-up genes，不额外保存行号，不保存列名，gene symbol外面不要加引号
 write.table(
   disease_up_genes,
   "results/drug_repurposing/disease_up_genes.txt",
@@ -1575,7 +1585,6 @@ write.table(
 ```{r}
 lincs_file <- "data/l1000cds2_assignment_data.rds"
 # Load the LINCS assignment data
-# 读取drug repurposing分析所需的LINCS reference data
 assignment_data <- readRDS(
   lincs_file
 )
@@ -1584,7 +1593,6 @@ assignment_data <- readRDS(
 ```{r}
 
 # Extract the LINCS gene universe
-# 提取LINCS reference中使用的gene universe
 lincs_genes <- assignment_data$lincs_gene_universe
 
 
@@ -1597,6 +1605,7 @@ head(lincs_genes)
 # 查看gene identifier的数据类型
 class(lincs_genes)
 ```
+
 ```{r}
 # Prepare Cancer-up disease signature using Entrez Gene IDs
 # 使用Entrez Gene ID准备Cancer-up signature
@@ -1704,6 +1713,7 @@ class(disease_down_entrez)
 head(disease_up_entrez)
 head(disease_down_entrez)
 ```
+
 ```{r}
 # Combine Cancer-up and Cancer-down query genes
 # 合并300个disease signature genes
@@ -1738,6 +1748,7 @@ paste(
   "query genes"
 )
 ```
+
 ```{r}
 # Extract the drug reference signatures
 # 提取课堂数据中的drug reference signatures
@@ -1766,7 +1777,7 @@ results <- ref %>%
   mutate(
     
     # Disease-up genes overlapping with drug-down genes
-    # Cancer中上调，但drug处理后下调
+    # Cancer中上调，但drug处理后下调，intersect()取交集
     # 这是我们希望看到的reversal方向之一
     overlap_up_dn = length(
       intersect(
@@ -1835,9 +1846,9 @@ results %>%
   head(20)
 ```
 
+## 7.1 overlap score plot
 ```{r}
 # Load packages needed for plotting
-# 加载drug repurposing结果整理和绘图需要的packages
 library(ggplot2)
 library(forcats)
 library(stringr)
@@ -1845,7 +1856,6 @@ library(dplyr)
 
 
 # Select the top 20 drug signatures
-# 选择overlap score最高的20个drug signatures
 top20_plot <- results %>%
   
   # results已经按照score从高到低排列
@@ -1894,7 +1904,7 @@ drug_plot <- ggplot(
 # 显示drug repurposing结果图
 drug_plot
 ```
-
+## 7.2 drug-cell line signiture reversal score
 ```{r}
 # Create a label containing both compound and cell line
 # 将compound和cell line组合起来，避免不同cell中的drug signature混淆
@@ -1953,7 +1963,6 @@ drug_cell_plot <- ggplot(
 
 
 # Display the plot
-# 显示结果
 drug_cell_plot
 ```
 
@@ -2113,7 +2122,6 @@ pheatmap(
 )
 ```
 
-
 ```{r}
 # Save the Top 30 DEG heatmap directly with pheatmap
 # 直接使用pheatmap的filename参数保存Top 30 DEG heatmap
@@ -2167,7 +2175,6 @@ write.csv(
   row.names = FALSE
 )
 ```
-
 
 ```{r}
 # Select significant DEGs
@@ -2453,4 +2460,3 @@ writeLines(
   )
 )
 ```
-
