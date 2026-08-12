@@ -1965,7 +1965,7 @@ drug_cell_plot <- ggplot(
 # Display the plot
 drug_cell_plot
 ```
-
+# 8. create folders
 ```{r}
 
 # Create a folder for final figures
@@ -2022,6 +2022,7 @@ dir.create(
 )
 ```
 
+# 9. save plots
 ```{r}
 # Save the PCA plot
 # 保存PCA图，300 dpi适合presentation和report
@@ -2162,6 +2163,7 @@ pheatmap(
 )
 ```
 
+# 10. export results
 ```{r}
 # Export all annotated DESeq2 results
 # 导出全部25582个genes的差异表达结果
